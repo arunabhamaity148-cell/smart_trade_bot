@@ -13,6 +13,7 @@ class TelegramBot:
         self.parser = SignalParser()
         self.db = TradeDatabase()
         self.monitor = None
+        self.application = None
     
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"""
@@ -171,19 +172,24 @@ Ready to monitor trades!
         await update.message.reply_text("✅ Bot is healthy!")
     
     def run(self):
-        application = Application.builder().token(BOT_TOKEN).build()
+        # Build application
+        self.application = Application.builder().token(BOT_TOKEN).build()
         
-        application.add_handler(CommandHandler("start", self.start))
-        application.add_handler(CommandHandler("test", self.test_connection))
-        application.add_handler(CommandHandler("status", self.status))
-        application.add_handler(CommandHandler("history", self.history))
-        application.add_handler(CommandHandler("close", self.close_trade))
-        application.add_handler(CommandHandler("stop", self.stop_monitor))
-        application.add_handler(CommandHandler("health", self.health_check))
-        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_signal))
+        # Add handlers
+        self.application.add_handler(CommandHandler("start", self.start))
+        self.application.add_handler(CommandHandler("test", self.test_connection))
+        self.application.add_handler(CommandHandler("status", self.status))
+        self.application.add_handler(CommandHandler("history", self.history))
+        self.application.add_handler(CommandHandler("close", self.close_trade))
+        self.application.add_handler(CommandHandler("stop", self.stop_monitor))
+        self.application.add_handler(CommandHandler("health", self.health_check))
+        self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_signal))
         
-        # Railway health check endpoint
-        port = int(os.getenv('PORT', 8080))
+        # IMPORTANT: Drop pending updates to avoid conflict
+        print("🤖 Bot starting...")
+        print("🧹 Dropping pending updates...")
         
-        print(f"🤖 Bot starting on port {port}...")
-        application.run_polling(allowed_updates=Update.ALL_TYPES)
+        self.application.run_polling(
+            drop_pending_updates=True,  # This fixes the conflict
+            allowed_updates=Update.ALL_TYPES
+        )
