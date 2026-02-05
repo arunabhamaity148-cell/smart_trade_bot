@@ -7,38 +7,33 @@ import os
 
 @dataclass
 class Trade:
+    # Required fields (no defaults) - MUST come first
     id: str
     pair: str
     direction: str
-    
     entry_min: float
     entry_max: float
-    
     tp1: float
     tp2: float
     tp3: float
-    
     stop_loss: float
-    breakeven_price: Optional[float] = None
-    current_sl: Optional[float] = None
-    
-    tp1_hit: bool = False
-    tp2_hit: bool = False
-    tp3_hit: bool = False
-    
-    tp1_closed_percent: float = 0
-    tp2_closed_percent: float = 0
-    tp3_closed_percent: float = 0
-    
     risk_percent: float
     leverage: str
     valid_hours: int
     strength: int
-    
     created_at: datetime
+    
+    # Optional fields (with defaults) - come after
+    breakeven_price: Optional[float] = None
+    current_sl: Optional[float] = None
+    tp1_hit: bool = False
+    tp2_hit: bool = False
+    tp3_hit: bool = False
+    tp1_closed_percent: float = 0
+    tp2_closed_percent: float = 0
+    tp3_closed_percent: float = 0
     status: str = 'PENDING'
     entry_price: Optional[float] = None
-    
     alerts_sent: List[str] = field(default_factory=list)
     price_history: List[dict] = field(default_factory=list)
     
@@ -63,6 +58,9 @@ class Trade:
     def get_remaining_position(self) -> float:
         return 100 - self.tp1_closed_percent - self.tp2_closed_percent - self.tp3_closed_percent
     
+    def is_expired(self) -> bool:
+        return datetime.utcnow() > self.expiry_time
+    
     def to_dict(self):
         return {
             'id': self.id,
@@ -74,6 +72,11 @@ class Trade:
             'tp2': self.tp2,
             'tp3': self.tp3,
             'stop_loss': self.stop_loss,
+            'risk_percent': self.risk_percent,
+            'leverage': self.leverage,
+            'valid_hours': self.valid_hours,
+            'strength': self.strength,
+            'created_at': self.created_at.isoformat(),
             'breakeven_price': self.breakeven_price,
             'current_sl': self.current_sl,
             'tp1_hit': self.tp1_hit,
@@ -82,11 +85,6 @@ class Trade:
             'tp1_closed_percent': self.tp1_closed_percent,
             'tp2_closed_percent': self.tp2_closed_percent,
             'tp3_closed_percent': self.tp3_closed_percent,
-            'risk_percent': self.risk_percent,
-            'leverage': self.leverage,
-            'valid_hours': self.valid_hours,
-            'strength': self.strength,
-            'created_at': self.created_at.isoformat(),
             'status': self.status,
             'entry_price': self.entry_price,
             'alerts_sent': self.alerts_sent,
@@ -95,6 +93,7 @@ class Trade:
     
     @classmethod
     def from_dict(cls, data):
+        # Convert datetime string back to object
         data['created_at'] = datetime.fromisoformat(data['created_at'])
         return cls(**data)
 
