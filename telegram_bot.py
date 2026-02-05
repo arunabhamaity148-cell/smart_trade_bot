@@ -4,8 +4,9 @@ from telegram.ext import Application, CommandHandler, MessageHandler, ContextTyp
 from signal_parser import SignalParser
 from database import TradeDatabase
 from trade_monitor import TradeMonitor
-from config import BOT_TOKEN, CHAT_ID, BINANCE_API_KEY, BINANCE_SECRET
+from config import BOT_TOKEN, CHAT_ID
 import asyncio
+import os
 
 class TelegramBot:
     def __init__(self):
@@ -15,14 +16,17 @@ class TelegramBot:
     
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"""
-🤖 <b>Smart Multi-TP Trade Bot</b>
+🤖 <b>Smart Multi-TP Trade Bot</b> (CoinDCX Edition)
+
+<b>✅ Connected to CoinDCX</b>
 
 <b>ফিচারস:</b>
 ✅ TP1, TP2, TP3 মনিটরিং
 ✅ Auto Partial Close (30%-30%-40%)
-✅ Auto BE Move (TP1 হিটে)
-✅ Auto Trailing SL (TP2, TP3 হিটে)
+✅ Auto BE Move
+✅ Auto Trailing SL
 ✅ ২৫টি ডেঞ্জার অ্যালার্ট
+✅ Railway Cloud Deploy
 
 <b>কমান্ডস:</b>
 /start - শুরু
@@ -30,13 +34,40 @@ class TelegramBot:
 /history - ক্লোজড ট্রেড
 /close SYMBOL - বন্ধ করুন
 /stop - মনিটরিং বন্ধ
+/test - কানেকশন টেস্ট
 
 <b>ব্যবহার:</b>
 সিগন্যাল কপি করে পেস্ট করুন!
 """, parse_mode='HTML')
     
+    async def test_connection(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Test CoinDCX connection"""
+        from coindcx_api import coindcx
+        
+        await update.message.reply_text("🔄 Testing CoinDCX connection...")
+        
+        try:
+            price = coindcx.get_price("BTCUSDT")
+            if price > 0:
+                await update.message.reply_text(f"""
+✅ <b>CoinDCX Connected!</b>
+
+BTC Price: ${price:,.2f}
+
+Ready to monitor trades!
+""")
+            else:
+                await update.message.reply_text("⚠️ Using backup price sources")
+        except Exception as e:
+            await update.message.reply_text(f"❌ Error: {e}")
+    
     async def handle_signal(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = update.message.text
+        
+        # Check if it's a signal
+        if '🔴' not in text and 'SETP' not in text:
+            await update.message.reply_text("❌ এটা সিগন্যাল নয়!")
+            return
         
         try:
             trade = self.parser.parse(text)
@@ -56,17 +87,17 @@ class TelegramBot:
         # Save and confirm
         self.db.add(trade)
         summary = self.parser.format_summary(trade)
+        
+        # Add CoinDCX note
+        summary += "\n<b>💹 Price Source: CoinDCX API</b>"
+        
         await update.message.reply_text(summary, parse_mode='HTML')
         
         # Start monitor
         if self.monitor is None:
-            self.monitor = TradeMonitor(
-                BINANCE_API_KEY,
-                BINANCE_SECRET,
-                BOT_TOKEN
-            )
+            self.monitor = TradeMonitor(BOT_TOKEN)
             asyncio.create_task(self.monitor.monitor_loop())
-            await update.message.reply_text("✅ মনিটরিং শুরু হয়েছে!")
+            await update.message.reply_text("✅ মনিটরিং শুরু হয়েছে!\n🌐 Running on Railway Cloud")
     
     async def status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         active = self.db.get_active()
@@ -135,15 +166,24 @@ class TelegramBot:
         
         await update.message.reply_text("🛑 মনিটরিং বন্ধ করা হয়েছে।")
     
+    async def health_check(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Health check for Railway"""
+        await update.message.reply_text("✅ Bot is healthy!")
+    
     def run(self):
         application = Application.builder().token(BOT_TOKEN).build()
         
         application.add_handler(CommandHandler("start", self.start))
+        application.add_handler(CommandHandler("test", self.test_connection))
         application.add_handler(CommandHandler("status", self.status))
         application.add_handler(CommandHandler("history", self.history))
         application.add_handler(CommandHandler("close", self.close_trade))
         application.add_handler(CommandHandler("stop", self.stop_monitor))
+        application.add_handler(CommandHandler("health", self.health_check))
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_signal))
         
-        print("🤖 বট স্টার্ট!")
-        application.run_polling()
+        # Railway health check endpoint
+        port = int(os.getenv('PORT', 8080))
+        
+        print(f"🤖 Bot starting on port {port}...")
+        application.run_polling(allowed_updates=Update.ALL_TYPES)
