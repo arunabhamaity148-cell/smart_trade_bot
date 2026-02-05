@@ -1,4 +1,4 @@
-# config.py
+# config.py (Alternative - with USE_PUBLIC_API)
 import os
 from dotenv import load_dotenv
 
@@ -9,14 +9,13 @@ BOT_TOKEN = os.getenv('BOT_TOKEN')
 CHAT_ID = os.getenv('CHAT_ID')
 
 # ========== COINDCX API ==========
-COINDCX_API_KEY = os.getenv('COINDCX_API_KEY')
-COINDCX_SECRET = os.getenv('COINDCX_SECRET')
+COINDCX_API_KEY = os.getenv('COINDCX_API_KEY', '')
+COINDCX_SECRET = os.getenv('COINDCX_SECRET', '')
+USE_PUBLIC_API = os.getenv('USE_PUBLIC_API', 'true').lower() == 'true'
 
-# ========== RAILWAY WEBHOOK ==========
+# ========== RAILWAY ==========
 PORT = int(os.getenv('PORT', '8080'))
 RAILWAY_PUBLIC_DOMAIN = os.getenv('RAILWAY_PUBLIC_DOMAIN')
-
-# Webhook URL auto-generate
 WEBHOOK_URL = None
 if RAILWAY_PUBLIC_DOMAIN:
     WEBHOOK_URL = f"https://{RAILWAY_PUBLIC_DOMAIN}/webhook/{BOT_TOKEN}"
@@ -62,7 +61,7 @@ def validate_config():
     if WEBHOOK_URL:
         print(f"🌐 Webhook URL: {WEBHOOK_URL}")
     else:
-        print("🔄 Polling mode (local)")
+        print("🔄 Polling mode")
     
     print("✅ Config OK!")
 
