@@ -4,7 +4,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, ContextTyp
 from signal_parser import SignalParser
 from database import TradeDatabase
 from trade_monitor import TradeMonitor
-from config import BOT_TOKEN, CHAT_ID
+from config import BOT_TOKEN, CHAT_ID, PORT, WEBHOOK_URL
 import asyncio
 import os
 
@@ -20,6 +20,7 @@ class TelegramBot:
 🤖 <b>Smart Multi-TP Trade Bot</b> (CoinDCX Edition)
 
 <b>✅ Connected to CoinDCX</b>
+<b>🌐 Mode: {'Webhook' if WEBHOOK_URL else 'Polling'}</b>
 
 <b>ফিচারস:</b>
 ✅ TP1, TP2, TP3 মনিটরিং
@@ -35,37 +36,14 @@ class TelegramBot:
 /history - ক্লোজড ট্রেড
 /close SYMBOL - বন্ধ করুন
 /stop - মনিটরিং বন্ধ
-/test - কানেকশন টেস্ট
 
 <b>ব্যবহার:</b>
 সিগন্যাল কপি করে পেস্ট করুন!
 """, parse_mode='HTML')
     
-    async def test_connection(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Test CoinDCX connection"""
-        from coindcx_api import coindcx
-        
-        await update.message.reply_text("🔄 Testing CoinDCX connection...")
-        
-        try:
-            price = coindcx.get_price("BTCUSDT")
-            if price > 0:
-                await update.message.reply_text(f"""
-✅ <b>CoinDCX Connected!</b>
-
-BTC Price: ${price:,.2f}
-
-Ready to monitor trades!
-""")
-            else:
-                await update.message.reply_text("⚠️ Using backup price sources")
-        except Exception as e:
-            await update.message.reply_text(f"❌ Error: {e}")
-    
     async def handle_signal(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = update.message.text
         
-        # Check if it's a signal
         if '🔴' not in text and 'SETP' not in text:
             await update.message.reply_text("❌ এটা সিগন্যাল নয়!")
             return
@@ -76,7 +54,6 @@ Ready to monitor trades!
             await update.message.reply_text(f"❌ পার্স এরর: {e}")
             return
         
-        # Check duplicate
         existing = self.db.get_by_pair(trade.pair)
         if existing:
             await update.message.reply_text(
@@ -85,20 +62,16 @@ Ready to monitor trades!
             )
             return
         
-        # Save and confirm
         self.db.add(trade)
         summary = self.parser.format_summary(trade)
-        
-        # Add CoinDCX note
         summary += "\n<b>💹 Price Source: CoinDCX API</b>"
         
         await update.message.reply_text(summary, parse_mode='HTML')
         
-        # Start monitor
         if self.monitor is None:
             self.monitor = TradeMonitor(BOT_TOKEN)
             asyncio.create_task(self.monitor.monitor_loop())
-            await update.message.reply_text("✅ মনিটরিং শুরু হয়েছে!\n🌐 Running on Railway Cloud")
+            await update.message.reply_text("✅ মনিটরিং শুরু!")
     
     async def status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         active = self.db.get_active()
@@ -111,16 +84,7 @@ Ready to monitor trades!
         
         for t in active:
             emoji = "🟢" if t.direction == "LONG" else "🔴"
-            tp_status = ""
-            
-            if t.tp3_hit:
-                tp_status = "🥉 TP3"
-            elif t.tp2_hit:
-                tp_status = "🥈 TP2"
-            elif t.tp1_hit:
-                tp_status = "🥇 TP1"
-            else:
-                tp_status = "⏳ পেন্ডিং"
+            tp_status = "🥉 TP3" if t.tp3_hit else "🥈 TP2" if t.tp2_hit else "🥇 TP1" if t.tp1_hit else "⏳ পেন্ডিং"
             
             msg += f"{emoji} <b>{t.pair}</b> | {tp_status}\n"
             msg += f"   এন্ট্রি: ${t.entry_avg:.4f}\n"
@@ -147,7 +111,7 @@ Ready to monitor trades!
                 msg += f"   TP2: {t.tp2_closed_percent}%\n"
             if t.tp3_hit:
                 msg += f"   TP3: {t.tp3_closed_percent}%\n"
-            msg += f"   স্ট্যাটাস: {t.status}\n\n"
+            msg += "\n"
         
         await update.message.reply_text(msg, parse_mode='HTML')
     
@@ -165,31 +129,42 @@ Ready to monitor trades!
             self.monitor.stop()
             self.monitor = None
         
-        await update.message.reply_text("🛑 মনিটরিং বন্ধ করা হয়েছে।")
+        await update.message.reply_text("🛑 মনিটরিং বন্ধ।")
     
-    async def health_check(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Health check for Railway"""
-        await update.message.reply_text("✅ Bot is healthy!")
+    def _add_handlers(self, app):
+        """Add all handlers"""
+        app.add_handler(CommandHandler("start", self.start))
+        app.add_handler(CommandHandler("status", self.status))
+        app.add_handler(CommandHandler("history", self.history))
+        app.add_handler(CommandHandler("close", self.close_trade))
+        app.add_handler(CommandHandler("stop", self.stop_monitor))
+        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_signal))
     
     def run(self):
-        # Build application
-        self.application = Application.builder().token(BOT_TOKEN).build()
-        
-        # Add handlers
-        self.application.add_handler(CommandHandler("start", self.start))
-        self.application.add_handler(CommandHandler("test", self.test_connection))
-        self.application.add_handler(CommandHandler("status", self.status))
-        self.application.add_handler(CommandHandler("history", self.history))
-        self.application.add_handler(CommandHandler("close", self.close_trade))
-        self.application.add_handler(CommandHandler("stop", self.stop_monitor))
-        self.application.add_handler(CommandHandler("health", self.health_check))
-        self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_signal))
-        
-        # IMPORTANT: Drop pending updates to avoid conflict
-        print("🤖 Bot starting...")
-        print("🧹 Dropping pending updates...")
-        
-        self.application.run_polling(
-            drop_pending_updates=True,  # This fixes the conflict
-            allowed_updates=Update.ALL_TYPES
-        )
+        if WEBHOOK_URL:
+            # ===== WEBHOOK MODE (Production) =====
+            print(f"🌐 Starting WEBHOOK mode")
+            print(f"🔗 URL: {WEBHOOK_URL}")
+            
+            self.application = Application.builder().token(BOT_TOKEN).build()
+            self._add_handlers(self.application)
+            
+            # Setup webhook
+            self.application.run_webhook(
+                listen="0.0.0.0",
+                port=PORT,
+                webhook_url=WEBHOOK_URL,
+                drop_pending_updates=True
+            )
+            
+        else:
+            # ===== POLLING MODE (Local) =====
+            print("🔄 Starting POLLING mode")
+            
+            self.application = Application.builder().token(BOT_TOKEN).build()
+            self._add_handlers(self.application)
+            
+            self.application.run_polling(
+                drop_pending_updates=True,
+                allowed_updates=Update.ALL_TYPES
+            )
