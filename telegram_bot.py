@@ -1,12 +1,12 @@
 # telegram_bot.py
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
+from aiohttp import web
+import asyncio
 from signal_parser import SignalParser
 from database import TradeDatabase
 from trade_monitor import TradeMonitor
 from config import BOT_TOKEN, CHAT_ID, PORT, WEBHOOK_URL
-import asyncio
-import os
 
 class TelegramBot:
     def __init__(self):
@@ -14,13 +14,14 @@ class TelegramBot:
         self.db = TradeDatabase()
         self.monitor = None
         self.application = None
+        self.webhook_path = f"/webhook/{BOT_TOKEN}"
     
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"""
 🤖 <b>Smart Multi-TP Trade Bot</b> (CoinDCX Edition)
 
 <b>✅ Connected to CoinDCX</b>
-<b>🌐 Mode: {'Webhook' if WEBHOOK_URL else 'Polling'}</b>
+<b>🌐 Mode: Webhook</b>
 
 <b>ফিচারস:</b>
 ✅ TP1, TP2, TP3 মনিটরিং
@@ -28,7 +29,6 @@ class TelegramBot:
 ✅ Auto BE Move
 ✅ Auto Trailing SL
 ✅ ২৫টি ডেঞ্জার অ্যালার্ট
-✅ Railway Cloud Deploy
 
 <b>কমান্ডস:</b>
 /start - শুরু
@@ -131,40 +131,68 @@ class TelegramBot:
         
         await update.message.reply_text("🛑 মনিটরিং বন্ধ।")
     
-    def _add_handlers(self, app):
-        """Add all handlers"""
-        app.add_handler(CommandHandler("start", self.start))
-        app.add_handler(CommandHandler("status", self.status))
-        app.add_handler(CommandHandler("history", self.history))
-        app.add_handler(CommandHandler("close", self.close_trade))
-        app.add_handler(CommandHandler("stop", self.stop_monitor))
-        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_signal))
+    async def run(self):
+        """Run with webhook"""
+        print(f"🌐 Starting WEBHOOK mode")
+        print(f"🔗 Webhook path: {self.webhook_path}")
+        
+        # Create application
+        self.application = Application.builder().token(BOT_TOKEN).build()
+        
+        # Add handlers
+        self.application.add_handler(CommandHandler("start", self.start))
+        self.application.add_handler(CommandHandler("status", self.status))
+        self.application.add_handler(CommandHandler("history", self.history))
+        self.application.add_handler(CommandHandler("close", self.close_trade))
+        self.application.add_handler(CommandHandler("stop", self.stop_monitor))
+        self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_signal))
+        
+        # Setup webhook
+        await self.application.initialize()
+        await self.application.start()
+        
+        # Set webhook
+        await self.application.bot.set_webhook(
+            url=f"{WEBHOOK_URL}{self.webhook_path}",
+            drop_pending_updates=True
+        )
+        
+        print(f"✅ Webhook set: {WEBHOOK_URL}{self.webhook_path}")
+        
+        # Create aiohttp app for webhook handling
+        web_app = web.Application()
+        web_app.router.add_post(self.webhook_path, self._handle_webhook)
+        web_app.router.add_get('/', self._health_check)
+        web_app.router.add_get('/health', self._health_check)
+        
+        # Run web server
+        runner = web.AppRunner(web_app)
+        await runner.setup()
+        site = web.TCPSite(runner, '0.0.0.0', PORT)
+        await site.start()
+        
+        print(f"🚀 Server running on port {PORT}")
+        
+        # Keep running
+        while True:
+            await asyncio.sleep(3600)
     
-    def run(self):
-        if WEBHOOK_URL:
-            # ===== WEBHOOK MODE (Production) =====
-            print(f"🌐 Starting WEBHOOK mode")
-            print(f"🔗 URL: {WEBHOOK_URL}")
-            
-            self.application = Application.builder().token(BOT_TOKEN).build()
-            self._add_handlers(self.application)
-            
-            # Setup webhook
-            self.application.run_webhook(
-                listen="0.0.0.0",
-                port=PORT,
-                webhook_url=WEBHOOK_URL,
-                drop_pending_updates=True
-            )
-            
-        else:
-            # ===== POLLING MODE (Local) =====
-            print("🔄 Starting POLLING mode")
-            
-            self.application = Application.builder().token(BOT_TOKEN).build()
-            self._add_handlers(self.application)
-            
-            self.application.run_polling(
-                drop_pending_updates=True,
-                allowed_updates=Update.ALL_TYPES
-            )
+    async def _handle_webhook(self, request):
+        """Handle incoming webhook updates"""
+        data = await request.json()
+        update = Update.de_json(data, self.application.bot)
+        await self.application.process_update(update)
+        return web.Response(status=200)
+    
+    async def _health_check(self, request):
+        """Health check endpoint"""
+        return web.Response(text="✅ Bot is healthy!", status=200)
+
+
+# For compatibility with main.py
+def main():
+    bot = TelegramBot()
+    asyncio.run(bot.run())
+
+if __name__ == "__main__":
+    main()
