@@ -6,13 +6,14 @@ import uuid
 import threading
 import time
 import requests
+import asyncio
 from datetime import datetime
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict
 
 from flask import Flask, request, jsonify
 from telegram import Bot, Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+import telegram
 
 # ========== CONFIG ==========
 BOT_TOKEN = os.getenv('BOT_TOKEN')
@@ -135,8 +136,13 @@ class Database:
 
 db = Database()
 
-# ========== TELEGRAM SETUP ==========
-bot = Bot(token=BOT_TOKEN)
+# ========== SYNC BOT (v13 style for simplicity) ==========
+# Use sync version to avoid async issues
+from telegram.ext import Updater
+
+updater = Updater(token=BOT_TOKEN, use_context=True)
+dispatcher = updater.dispatcher
+bot_sync = updater.bot
 
 # ========== SIGNAL PARSER ==========
 def parse_signal(text: str) -> Optional[Trade]:
@@ -308,7 +314,7 @@ def monitor_loop():
                 
                 for alert in alerts:
                     try:
-                        bot.send_message(chat_id=CHAT_ID, text=alert, parse_mode='HTML')
+                        bot_sync.send_message(chat_id=CHAT_ID, text=alert, parse_mode='HTML')
                         print(f"✅ Alert: {alert[:50]}")
                     except Exception as e:
                         print(f"❌ Send error: {e}")
@@ -322,7 +328,73 @@ def monitor_loop():
             print(f"❌ Monitor error: {e}")
             time.sleep(30)
 
+# ========== TELEGRAM HANDLERS ==========
+from telegram.ext import CommandHandler, MessageHandler, Filters
+
+def cmd_start(update, context):
+    update.message.reply_text("""🤖 <b>Smart Trade Bot</b> (Flask Edition)
+
+✅ Running 24/7 on Railway
+✅ Auto TP/SL Monitoring
+✅ Real-time Alerts
+
+Send signal to start monitoring!""", parse_mode='HTML')
+
+def cmd_status(update, context):
+    active = db.get_active()
+    if not active:
+        update.message.reply_text("⏳ No active trades")
+        return
+    
+    msg = "📊 <b>Active Trades:</b>\n\n"
+    for t in active:
+        emoji = "🟢" if t.direction == "LONG" else "🔴"
+        status = "🥉TP3" if t.tp3_hit else "🥈TP2" if t.tp2_hit else "🥇TP1" if t.tp1_hit else "⏳PENDING"
+        msg += f"{emoji} <b>{t.pair}</b> | {status}\n"
+        msg += f"   Entry: ${t.entry_avg:.4f}\n"
+        msg += f"   SL: ${t.current_sl:.4f}\n\n"
+    
+    update.message.reply_text(msg, parse_mode='HTML')
+
+def handle_message(update, context):
+    """Handle incoming signals"""
+    text = update.message.text
+    
+    if '🔴' not in text:
+        return
+    
+    trade = parse_signal(text)
+    if not trade:
+        update.message.reply_text("❌ Failed to parse signal")
+        return
+    
+    existing = db.get_by_pair(trade.pair)
+    if existing:
+        update.message.reply_text(f"⚠️ {trade.pair} already being monitored!")
+        return
+    
+    db.add(trade)
+    
+    msg = f"""
+🎯 <b>{trade.pair} {trade.direction}</b> Monitoring Started!
+
+📊 Strength: {trade.strength}/100
+🎯 Entry: ${trade.entry_min} - ${trade.entry_max}
+🥇 TP1: ${trade.tp1}
+🥈 TP2: ${trade.tp2}
+🥉 TP3: ${trade.tp3}
+🛡️ SL: ${trade.stop_loss}
+
+✅ You'll receive alerts automatically!"""
+    update.message.reply_text(msg, parse_mode='HTML')
+
+# Register handlers
+dispatcher.add_handler(CommandHandler('start', cmd_start))
+dispatcher.add_handler(CommandHandler('status', cmd_status))
+dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, handle_message))
+
 # ========== FLASK APP ==========
+from flask import Flask
 app = Flask(__name__)
 
 @app.route('/')
@@ -339,70 +411,8 @@ def health():
 def webhook():
     """Telegram webhook handler"""
     try:
-        data = request.get_json()
-        update = Update.de_json(data, bot)
-        
-        # Process update manually (no Dispatcher in v20)
-        if update.message:
-            if update.message.text:
-                text = update.message.text
-                
-                # Command: /start
-                if text == '/start':
-                    bot.send_message(
-                        chat_id=update.message.chat_id,
-                        text="""🤖 <b>Smart Trade Bot</b> (Flask Edition)
-
-✅ Running 24/7 on Railway
-✅ Auto TP/SL Monitoring
-✅ Real-time Alerts
-
-Send signal to start monitoring!""",
-                        parse_mode='HTML'
-                    )
-                
-                # Command: /status
-                elif text == '/status':
-                    active = db.get_active()
-                    if not active:
-                        bot.send_message(chat_id=update.message.chat_id, text="⏳ No active trades")
-                    else:
-                        msg = "📊 <b>Active Trades:</b>\n\n"
-                        for t in active:
-                            emoji = "🟢" if t.direction == "LONG" else "🔴"
-                            status = "🥉TP3" if t.tp3_hit else "🥈TP2" if t.tp2_hit else "🥇TP1" if t.tp1_hit else "⏳PENDING"
-                            msg += f"{emoji} <b>{t.pair}</b> | {status}\n"
-                            msg += f"   Entry: ${t.entry_avg:.4f}\n"
-                            msg += f"   SL: ${t.current_sl:.4f}\n\n"
-                        bot.send_message(chat_id=update.message.chat_id, text=msg, parse_mode='HTML')
-                
-                # Signal message
-                elif '🔴' in text:
-                    trade = parse_signal(text)
-                    if not trade:
-                        bot.send_message(chat_id=update.message.chat_id, text="❌ Failed to parse signal")
-                        return 'OK', 200
-                    
-                    existing = db.get_by_pair(trade.pair)
-                    if existing:
-                        bot.send_message(chat_id=update.message.chat_id, text=f"⚠️ {trade.pair} already being monitored!")
-                        return 'OK', 200
-                    
-                    db.add(trade)
-                    
-                    msg = f"""
-🎯 <b>{trade.pair} {trade.direction}</b> Monitoring Started!
-
-📊 Strength: {trade.strength}/100
-🎯 Entry: ${trade.entry_min} - ${trade.entry_max}
-🥇 TP1: ${trade.tp1}
-🥈 TP2: ${trade.tp2}
-🥉 TP3: ${trade.tp3}
-🛡️ SL: ${trade.stop_loss}
-
-✅ You'll receive alerts automatically!"""
-                    bot.send_message(chat_id=update.message.chat_id, text=msg, parse_mode='HTML')
-        
+        update = Update.de_json(request.get_json(), bot_sync)
+        dispatcher.process_update(update)
         return 'OK', 200
     except Exception as e:
         print(f"Webhook error: {e}")
@@ -414,11 +424,11 @@ if __name__ == '__main__':
     monitor_thread = threading.Thread(target=monitor_loop, daemon=True)
     monitor_thread.start()
     
-    # Set webhook
+    # Set webhook (sync version)
     if RAILWAY_URL:
         webhook_url = f"https://{RAILWAY_URL}/webhook"
         try:
-            bot.set_webhook(url=webhook_url)
+            bot_sync.set_webhook(url=webhook_url)
             print(f"✅ Webhook: {webhook_url}")
         except Exception as e:
             print(f"⚠️ Webhook error: {e}")
