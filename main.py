@@ -1,14 +1,14 @@
 # main.py
+import asyncio
 import os
 from telegram_bot import TelegramBot
 
-def main():
-    # Railway requires PORT env var
-    port = os.getenv('PORT', '8080')
+async def main():
+    port = int(os.getenv('PORT', '8080'))
     print(f"🚀 Starting bot on port {port}...")
     
     bot = TelegramBot()
-    bot.run()
+    await bot.run()  # await added here
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
