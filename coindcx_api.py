@@ -5,7 +5,7 @@ import hashlib
 import json
 import time
 from typing import Dict, Optional
-from config import COINDCX_API_KEY, COINDCX_SECRET, USE_PUBLIC_API
+from config import COINDCX_API_KEY, COINDCX_SECRET
 
 class CoinDCXAPI:
     def __init__(self):
@@ -65,9 +65,6 @@ class CoinDCXAPI:
         """Backup price source using CoinGecko"""
         try:
             coin = symbol.replace('USDT', '').lower()
-            url = f"https://api.coingecko.com/api/v3/simple/price?ids={coin}&vs_currencies=usd"
-            response = requests.get(url, timeout=10)
-            data = response.json()
             
             # Try common mappings
             coin_id_map = {
@@ -76,9 +73,18 @@ class CoinDCXAPI:
                 'eth': 'ethereum',
                 'sol': 'solana',
                 'tia': 'celestia',
+                'bnb': 'binancecoin',
+                'ada': 'cardano',
+                'dot': 'polkadot',
+                'link': 'chainlink',
+                'uni': 'uniswap',
             }
             
             coin_id = coin_id_map.get(coin, coin)
+            
+            url = f"https://api.coingecko.com/api/v3/simple/price?ids={coin_id}&vs_currencies=usd"
+            response = requests.get(url, timeout=10)
+            data = response.json()
             
             if coin_id in data:
                 return float(data[coin_id]['usd'])
@@ -97,7 +103,7 @@ class CoinDCXAPI:
         """Convert symbol to CoinDCX market format"""
         # SEIUSDT -> SEIUSDT or SEI-USDT
         coin = symbol.replace('USDT', '')
-        return f"{coin}USDT"  # Try this format first
+        return f"{coin}USDT"
     
     def get_balance(self) -> Dict:
         """Get account balance (requires API key)"""
