@@ -17,16 +17,12 @@ class SignalParser:
         strength_match = re.search(r'(\d+)/100', text)
         strength = int(strength_match.group(1)) if strength_match else 50
         
-        # Extract timeframe
-        tf_match = re.search(r'⏱️\s+(\w+)', text)
-        timeframe = tf_match.group(1) if tf_match else "1h"
-        
-        # Extract entry zone
+        # Extract entry
         entry_match = re.search(r'\$(\d+\.\d+)\s*-\s*\$(\d+\.\d+)', text)
         entry_min = float(entry_match.group(1)) if entry_match else 0.0
         entry_max = float(entry_match.group(2)) if entry_match else 0.0
         
-        # Extract all prices
+        # Extract prices
         prices = re.findall(r'\$(\d+\.\d+)', text)
         
         sl_price = 0.0
@@ -39,6 +35,7 @@ class SignalParser:
             tp3 = float(prices[5]) if len(prices) > 5 else 0.0
         
         # Calculate missing TPs
+        entry_avg = (entry_min + entry_max) / 2
         if tp2 == 0 and tp1 > 0:
             if direction == "LONG":
                 tp2 = tp1 + (tp1 - entry_min) * 0.6
@@ -59,9 +56,9 @@ class SignalParser:
         valid_match = re.search(r'⏳\s*Valid:\s*(\d+)h', text)
         valid_hours = int(valid_match.group(1)) if valid_match else 4
         
-        entry_avg = (entry_min + entry_max) / 2
-        
+        # Create trade with CORRECT field order
         return Trade(
+            # Required fields first
             id=str(uuid.uuid4())[:8],
             pair=pair,
             direction=direction,
@@ -71,14 +68,24 @@ class SignalParser:
             tp2=tp2,
             tp3=tp3,
             stop_loss=sl_price,
-            breakeven_price=entry_avg,
-            current_sl=sl_price,
             risk_percent=risk,
             leverage=leverage,
             valid_hours=valid_hours,
             strength=strength,
             created_at=datetime.utcnow(),
-            status='PENDING'
+            # Optional fields after
+            breakeven_price=entry_avg,
+            current_sl=sl_price,
+            tp1_hit=False,
+            tp2_hit=False,
+            tp3_hit=False,
+            tp1_closed_percent=0,
+            tp2_closed_percent=0,
+            tp3_closed_percent=0,
+            status='PENDING',
+            entry_price=None,
+            alerts_sent=[],
+            price_history=[]
         )
     
     def format_summary(self, trade: Trade) -> str:
