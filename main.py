@@ -1,4 +1,4 @@
-# app.py
+# main.py
 import os
 import re
 import json
@@ -11,7 +11,6 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Dict
 
 from flask import Flask, request, jsonify
-from telegram import Bot, Update
 
 # ========== CONFIG ==========
 BOT_TOKEN = os.getenv('BOT_TOKEN')
@@ -133,9 +132,6 @@ class Database:
                 return
 
 db = Database()
-
-# ========== BOT SETUP ==========
-bot = Bot(token=BOT_TOKEN)
 
 # ========== SIGNAL PARSER ==========
 def parse_signal(text: str) -> Optional[Trade]:
@@ -307,7 +303,6 @@ def monitor_loop():
                 
                 for alert in alerts:
                     try:
-                        # Use requests to send message (no async)
                         url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
                         data = {
                             'chat_id': CHAT_ID,
@@ -347,7 +342,6 @@ def webhook():
     try:
         data = request.get_json()
         
-        # Manual message handling
         if 'message' in data:
             msg = data['message']
             chat_id = msg['chat']['id']
@@ -436,6 +430,7 @@ if __name__ == '__main__':
         except Exception as e:
             print(f"⚠️ Webhook error: {e}")
     
-    # Start Flask
+    # Start Flask (for development)
+    # Gunicorn will handle this in production
     print(f"🚀 Flask starting on port {PORT}")
     app.run(host='0.0.0.0', port=PORT, threaded=True)
