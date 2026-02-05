@@ -1,11 +1,20 @@
 # config.py
-# ========== TELEGRAM SETTINGS ==========
-BOT_TOKEN = "YOUR_BOT_TOKEN_HERE"
-CHAT_ID = "YOUR_CHAT_ID_HERE"
+import os
+from dotenv import load_dotenv
 
-# ========== BINANCE API ==========
-BINANCE_API_KEY = "YOUR_API_KEY"
-BINANCE_SECRET = "YOUR_SECRET"
+load_dotenv()
+
+# ========== TELEGRAM ==========
+BOT_TOKEN = os.getenv('BOT_TOKEN')
+CHAT_ID = os.getenv('CHAT_ID')
+
+# ========== COINDCX API ==========
+COINDCX_API_KEY = os.getenv('COINDCX_API_KEY')
+COINDCX_SECRET = os.getenv('COINDCX_SECRET')
+USE_PUBLIC_API = os.getenv('USE_PUBLIC_API', 'true').lower() == 'true'
+
+# ========== RAILWAY ==========
+PORT = int(os.getenv('PORT', 8080))
 
 # ========== MONITOR SETTINGS ==========
 CHECK_INTERVAL = 10  # seconds
@@ -24,18 +33,33 @@ TP_STRATEGY = {
 
 # ========== ALERT THRESHOLDS ==========
 ALERT_THRESHOLDS = {
-    'TP_APPROACH': 0.80,      # 80% to TP
-    'WARNING': 0.01,          # 1% against position
-    'DANGER': 0.50,           # 50% to SL
-    'CRITICAL': 0.25,         # 25% to SL
-    'LIQUIDATION': 0.10,      # 10% to SL
-    'NEAR_BE': 0.002,         # 0.2% to BE
-    'RAPID_MOVE': 0.01,       # 1% in 5 min
+    'TP_APPROACH': 0.80,
+    'WARNING': 0.01,
+    'DANGER': 0.50,
+    'CRITICAL': 0.25,
+    'LIQUIDATION': 0.10,
+    'NEAR_BE': 0.002,
+    'RAPID_MOVE': 0.01,
 }
 
-# ========== COOLDOWNS (seconds) ==========
+# ========== COOLDOWNS ==========
 COOLDOWNS = {
     'DEFAULT': 60,
     'RAPID': 300,
     'TIME': 1800,
 }
+
+# Validate required env vars
+def validate_config():
+    missing = []
+    if not BOT_TOKEN:
+        missing.append('BOT_TOKEN')
+    if not CHAT_ID:
+        missing.append('CHAT_ID')
+    
+    if missing:
+        raise ValueError(f"Missing required environment variables: {', '.join(missing)}")
+    
+    print("✅ Configuration validated!")
+
+validate_config()
