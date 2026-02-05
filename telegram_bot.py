@@ -132,11 +132,11 @@ class TelegramBot:
         await update.message.reply_text("🛑 মনিটরিং বন্ধ।")
     
     async def run(self):
-        """Run with webhook"""
+        """Run bot with webhook"""
         print(f"🌐 Starting WEBHOOK mode")
         print(f"🔗 Webhook path: {self.webhook_path}")
         
-        # Create application
+        # Build application
         self.application = Application.builder().token(BOT_TOKEN).build()
         
         # Add handlers
@@ -147,25 +147,25 @@ class TelegramBot:
         self.application.add_handler(CommandHandler("stop", self.stop_monitor))
         self.application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_signal))
         
-        # Setup webhook
+        # Initialize
         await self.application.initialize()
         await self.application.start()
         
         # Set webhook
+        webhook_full_url = f"{WEBHOOK_URL}{self.webhook_path}"
         await self.application.bot.set_webhook(
-            url=f"{WEBHOOK_URL}{self.webhook_path}",
+            url=webhook_full_url,
             drop_pending_updates=True
         )
+        print(f"✅ Webhook set: {webhook_full_url}")
         
-        print(f"✅ Webhook set: {WEBHOOK_URL}{self.webhook_path}")
-        
-        # Create aiohttp app for webhook handling
+        # Create aiohttp app
         web_app = web.Application()
         web_app.router.add_post(self.webhook_path, self._handle_webhook)
         web_app.router.add_get('/', self._health_check)
         web_app.router.add_get('/health', self._health_check)
         
-        # Run web server
+        # Start server
         runner = web.AppRunner(web_app)
         await runner.setup()
         site = web.TCPSite(runner, '0.0.0.0', PORT)
@@ -173,26 +173,26 @@ class TelegramBot:
         
         print(f"🚀 Server running on port {PORT}")
         
-        # Keep running
-        while True:
-            await asyncio.sleep(3600)
+        # Keep alive forever
+        try:
+            while True:
+                await asyncio.sleep(3600)
+        finally:
+            await runner.cleanup()
+            await self.application.stop()
+            await self.application.shutdown()
     
     async def _handle_webhook(self, request):
-        """Handle incoming webhook updates"""
-        data = await request.json()
-        update = Update.de_json(data, self.application.bot)
-        await self.application.process_update(update)
-        return web.Response(status=200)
+        """Handle Telegram webhook"""
+        try:
+            data = await request.json()
+            update = Update.de_json(data, self.application.bot)
+            await self.application.process_update(update)
+            return web.Response(status=200)
+        except Exception as e:
+            print(f"❌ Webhook error: {e}")
+            return web.Response(status=500)
     
     async def _health_check(self, request):
-        """Health check endpoint"""
+        """Health check for Railway"""
         return web.Response(text="✅ Bot is healthy!", status=200)
-
-
-# For compatibility with main.py
-def main():
-    bot = TelegramBot()
-    asyncio.run(bot.run())
-
-if __name__ == "__main__":
-    main()
